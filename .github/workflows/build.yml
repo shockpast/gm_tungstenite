@@ -22,7 +22,7 @@ jobs:
       - run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get ugprade -y
+          sudo apt-get upgrade -y
           sudo apt-get install -y gcc-multilib g++-multilib clang:i386 libssl-dev:i386 pkg-config:i386 cmake:i386 libclang-dev:i386
 
           export OPENSSL_LIB_DIR=/usr/lib/i386-linux-gnu
