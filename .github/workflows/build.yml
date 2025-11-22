@@ -32,11 +32,12 @@ jobs:
           export LIBCLANG_PATH=/usr/lib/llvm-18/lib
 
       - name: install rust
-        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host i686-unknown-linux-gnu --profile minimal -y
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal -y
 
       - name: build
         run: |
           . $HOME/.cargo/env
+          rustup target add i686-unknown-linux-gnu
           cargo build --release --target i686-unknown-linux-gnu
 
       - run: strip target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so
