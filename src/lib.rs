@@ -5,9 +5,9 @@ use functions::lua_tungstenite;
 
 #[gmod13_open]
 fn gmod13_open(l: lua::State) {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
+    // tracing_subscriber::fmt()
+    //     .with_max_level(tracing::Level::DEBUG)
+    //     .init();
 
     let t_tung = l.create_table();
     t_tung.set(&l, "connect", l.create_function(lua_tungstenite::connect)).unwrap();
