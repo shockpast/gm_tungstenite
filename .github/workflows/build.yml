@@ -48,7 +48,7 @@ jobs:
           esac >> $GITHUB_ENV
 
       - name: upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ env.LIB_NAME }}_${{ env.suffix }}
           path: target/${{ matrix.target }}/release/
