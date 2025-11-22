@@ -13,18 +13,13 @@ pub mod lua_tungstenite {
     }
 
     #[derive(Debug)]
-    pub struct RustChannel {
-        pub data_type: DataType,
-        pub data: String
-    }
-    #[derive(Debug)]
     pub struct LuaChannel {
         pub data_type: DataType,
         pub data: String
     }
 
     pub struct Socket {
-        tx: mpsc::Sender<RustChannel>,
+        tx: mpsc::Sender<String>,
         rx: Arc<Mutex<mpsc::Receiver<LuaChannel>>>,
 
         id: uuid::Uuid
@@ -55,8 +50,8 @@ pub mod lua_tungstenite {
         let ud = this.borrow();
 
         ud.tx
-            .send(RustChannel { data_type: DataType::Generic, data: data.to_string() })
-            .map_err(|e| lua::Error::Runtime(format!("failed to send a message ({e})")))?;
+            .send(data.to_string())
+            .map_err(|e| lua::Error::Runtime(format!("send failed: {e}")))?;
 
         Ok(())
     }
@@ -75,26 +70,30 @@ pub mod lua_tungstenite {
                         match message.data_type {
                             DataType::Generic => {
                                 if let Ok(func) = mt.get::<lua::Function>(l, "on_message") {
-                                    func.call_no_rets_logged(l, (mt, message.data))
-                                        .unwrap();
+                                    if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
+                                        l.error_no_halt_with_stack(&e.to_string());
+                                    }
                                 }
                             },
                             DataType::Error => {
                                 if let Ok(func) = mt.get::<lua::Function>(l, "on_error") {
-                                    func.call_no_rets_logged(l, (mt, message.data))
-                                        .unwrap();
+                                    if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
+                                        l.error_no_halt_with_stack(&e.to_string());
+                                    }
                                 }
                             },
                             DataType::Connect => {
                                 if let Ok(func) = mt.get::<lua::Function>(l, "on_connect") {
-                                    func.call_no_rets_logged(l, (mt, message.data))
-                                        .unwrap();
+                                    if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
+                                        l.error_no_halt_with_stack(&e.to_string());
+                                    }
                                 }
                             },
                             DataType::Disconnect => {
                                 if let Ok(func) = mt.get::<lua::Function>(l, "on_disconnect") {
-                                    func.call_no_rets_logged(l, (mt, message.data))
-                                        .unwrap();
+                                    if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
+                                        l.error_no_halt_with_stack(&e.to_string());
+                                    }
                                 }
                             }
                         }
@@ -110,7 +109,7 @@ pub mod lua_tungstenite {
     pub fn connect(l: &lua::State, url: lua::String) -> lua::Result<lua::UserDataRef<Socket>> {
         let url = url.to_string();
 
-        let (tx_to_thread, rx_from_lua) = mpsc::channel::<RustChannel>();
+        let (tx_to_thread, rx_from_lua) = mpsc::channel::<String>();
         let (tx_to_lua, rx_to_lua) = mpsc::channel::<LuaChannel>();
 
         let rx_to_lua_arc = Arc::new(Mutex::new(rx_to_lua));
@@ -127,27 +126,33 @@ pub mod lua_tungstenite {
                 }
             };
 
+            match &mut socket.get_mut() {
+                tungstenite::stream::MaybeTlsStream::Plain(tcp) => {
+                    tcp.set_nonblocking(true)
+                        .unwrap(); // @note: hopium on maximum that it won't ever backfire
+                },
+                tungstenite::stream::MaybeTlsStream::NativeTls(tls_stream) => {
+                    tls_stream.get_mut().set_nonblocking(true)
+                        .unwrap();
+                }
+                _ => {}
+            }
+
             loop {
-                match rx_from_lua.try_recv() {
-                    Ok(msg) => {
-                        tracing::debug!("  lua->rust: {}", msg.data);
-                        let _ = socket.send(Message::text(msg.data));
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {},
-                    Err(_) => break,
+                match rx_from_lua.recv_timeout(std::time::Duration::from_millis(10)) {
+                    Ok(message) => {
+                        let _ = socket.send(Message::text(message));
+                    },
+                    Err(mpsc::RecvTimeoutError::Timeout) => {},
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 }
 
                 match socket.read() {
                     Ok(Message::Text(text)) => {
-                        tracing::debug!("  rust->lua: {}", text.to_string());
                         let _ = tx_to_lua.send(LuaChannel { data_type: DataType::Generic, data: text.to_string() });
                     }
                     Ok(Message::Ping(p)) => {
                         let _ = socket.send(Message::Pong(p));
-                    }
-                    Err(e) => {
-                        let _ = tx_to_lua.send(LuaChannel { data_type: DataType::Error, data: e.to_string() });
-                        break;
                     }
                     Ok(Message::Close(frame)) => {
                         if let Some(frame) = frame {
@@ -156,6 +161,11 @@ pub mod lua_tungstenite {
                             let _ = tx_to_lua.send(LuaChannel { data_type: DataType::Disconnect, data: "unknown".into() });
                         }
                     },
+                    Err(tungstenite::Error::Io(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => {},
+                    Err(e) => {
+                        let _ = tx_to_lua.send(LuaChannel { data_type: DataType::Error, data: e.to_string() });
+                        break;
+                    }
                     _ => {},
                 }
             }
