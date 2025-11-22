@@ -40,7 +40,7 @@ jobs:
           mv target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so binaries/gmsv_tungstenite_linux.dll
 
       - name: upload
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v3
         with:
           name: gmsv_tungstenite_linux
           path: binaries/gmsv_tungstenite_linux.dll
