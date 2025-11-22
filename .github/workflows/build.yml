@@ -18,6 +18,11 @@ jobs:
         shell: sh
 
     steps:
+      - name: install nodejs v20
+        run: |
+          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+          yum install -y nodejs
+
       - uses: actions/checkout@v1
 
       - name: install rust
@@ -57,6 +62,11 @@ jobs:
         shell: sh
 
     steps:
+      - name: install nodejs v20
+        run: |
+          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+          yum install -y nodejs
+
       - uses: actions/checkout@v1
 
       - name: install rust
