@@ -30,7 +30,7 @@ jobs:
           if [ "${{ matrix.arch }}" = "i686" ]; then
             sudo dpkg --add-architecture i386
             sudo apt-get update
-            sudo apt-get install -y gcc-multilib g++-multilib
+            sudo apt-get install -y gcc-multilib g++-multilib libssl-dev:i386
 
             rustup target add i686-unknown-linux-gnu
           else
@@ -41,8 +41,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          choco install -y curl GITHUB_ENV
-          
+          choco install -y curl
+
           if [[ "${{ matrix.arch }}" == "i686" ]]; then
             rustup target add i686-pc-windows-gnu
           else
