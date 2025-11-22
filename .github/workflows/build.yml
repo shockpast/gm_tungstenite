@@ -36,7 +36,7 @@ jobs:
 
       - name: build
         run: |
-          source $HOME/.cargo/env
+          . $HOME/.cargo/env
           cargo build --release --target i686-unknown-linux-gnu
 
       - run: strip target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so
