@@ -11,15 +11,33 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
     strategy:
       matrix:
-        target: [x86_64-unknown-linux-gnu, i686-unknown-linux-gnu, x86_64-pc-windows-gnu, i686-pc-windows-gnu]
+        os: [ubuntu-latest, windows-latest]
+        arch: [x86_64, i686]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: install linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config curl git libssl-dev
+
+          if [ "${{ matrix.arch }}" = "i686" ]; then
+            sudo dpkg --add-architecture i386
+            sudo apt-get update
+            sudo apt-get install -y gcc-multilib g++-multilib
+          fi
+
+      - name: install windows dependencies
+        if: runner.os == 'Windows'
+        run: |
+          choco install -y curl git
+          rustup target add i686-pc-windows-gnu
 
       - name: cargo cache
         uses: actions/cache@v4
@@ -31,29 +49,50 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: install build dependencies
+      - name: add rust targets
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libssl-dev curl git
+          if [ "${{ matrix.os }}" = "Linux" ]; then
+            if [ "${{ matrix.arch }}" = "x86_64" ]; then
+              echo "target=x86_64-unknown-linux-gnu" >> $GITHUB_ENV
+            else
+              echo "target=i686-unknown-linux-gnu" >> $GITHUB_ENV
+            fi
+          else
+            if [ "${{ matrix.arch }}" = "x86_64" ]; then
+              echo "target=x86_64-pc-windows-gnu" >> $GITHUB_ENV
+            else
+              echo "target=i686-pc-windows-gnu" >> $GITHUB_ENV
+            fi
 
-      - name: add target
-        run: rustup target add ${{ matrix.target }}
+          rustup target add ${{ env.target }}
 
-      - name: cargo build (release for ${{ matrix.target }})
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: build (${{ matrix.arch }})
+        run: cargo build --release --target ${{ env.target }}
 
-      - name: append prefix to lib
-        id: artifact_name
-        run: |
-          case "${{ matrix.target }}" in
-            x86_64-unknown-linux-gnu) echo "suffix=linux64" ;;
-            i686-unknown-linux-gnu) echo "suffix=linux" ;;
-            x86_64-pc-windows-gnu) echo "suffix=win64" ;;
-            i686-pc-windows-gnu) echo "suffix=win32" ;;
-          esac >> $GITHUB_ENV
+      # suffix
+      - run: |
+          case "${{ env.target }}" in
+            x86_64-unknown-linux-gnu) echo "suffix=linux64" >> $GITHUB_ENV ;;
+            i686-unknown-linux-gnu) echo "suffix=linux" >> $GITHUB_ENV ;;
+            x86_64-pc-windows-gnu) echo "suffix=win64" >> $GITHUB_ENV ;;
+            i686-pc-windows-gnu) echo "suffix=win32" >> $GITHUB_ENV ;;
+          esac
+
+      # rename with suffix
+      - run: |
+          if [[ "${{ env.target }}" == *"windows"* ]]; then
+            EXT=".dll";
+          else
+            EXT=".so";
+          fi
+
+          LIB_PATH="target/${{ env.target }}/release/${{ env.LIB_NAME }}${EXT}"
+          NEW_LIB_PATH="target/${{ env.target }}/release/${{ env.LIB_NAME }}_${{ env.suffix }}${EXT}"
+
+          mv $LIB_PATH $NEW_LIB_PATH
 
       - name: upload artifact
         uses: actions/upload-artifact@v5
         with:
           name: ${{ env.LIB_NAME }}_${{ env.suffix }}
-          path: target/${{ matrix.target }}/release/
+          path: target/${{ env.target }}/release/${{ env.LIB_NAME }}_${{ env.suffix }}${EXT}
