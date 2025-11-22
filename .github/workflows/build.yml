@@ -1,0 +1,54 @@
+name: Build
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  LIB_NAME: gmsv_tungstenite
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, i686-unknown-linux-gnu, x86_64-pc-windows-gnu, i686-pc-windows-gnu]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: cargo build (release for ${{ matrix.target }})
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: append prefix to lib
+        id: artifact_name
+        run: |
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu) echo "suffix=linux64" ;;
+            i686-unknown-linux-gnu) echo "suffix=linux" ;;
+            x86_64-pc-windows-gnu) echo "suffix=win64" ;;
+            i686-pc-windows-gnu) echo "suffix=win32" ;;
+          esac >> $GITHUB_ENV
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.LIB_NAME }}_${{ env.suffix }}
+          path: target/${{ matrix.target }}/release/
