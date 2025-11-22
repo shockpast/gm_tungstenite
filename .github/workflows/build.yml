@@ -39,6 +39,7 @@ jobs:
 
       - name: install windows dependencies
         if: runner.os == 'Windows'
+        shell: bash
         run: |
           choco install -y curl GITHUB_ENV
           
