@@ -11,7 +11,7 @@ env:
 jobs:
   build_linux:
     runs-on: ubuntu-latest
-    container: quay.io/pypa/manylinux2014_i686
+    container: quay.io/pypa/manylinux_2_34_i686
 
     defaults:
       run:
@@ -21,9 +21,10 @@ jobs:
       - uses: actions/checkout@v1
 
       - run: |
-          yum -y update
-          yum -y groupinstall "Development Tools"
-          yum -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl clang-devel
+          dnf -y update
+          dnf -y groupinstall "Development Tools"
+          dnf -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl
+          dnf -y install clang clang-devel llvm llvm-devel
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host i686-unknown-linux-gnu --profile minimal -y
@@ -46,7 +47,7 @@ jobs:
 
   build_linux64:
     runs-on: ubuntu-latest
-    container: quay.io/pypa/manylinux2014_x86_64
+    container: quay.io/pypa/manylinux_2_34_x86_64
 
     defaults:
       run:
@@ -56,9 +57,10 @@ jobs:
       - uses: actions/checkout@v1
 
       - run: |
-          yum -y update
-          yum -y groupinstall "Development Tools"
-          yum -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl clang-devel
+          dnf -y update
+          dnf -y groupinstall "Development Tools"
+          dnf -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl
+          dnf -y install clang clang-devel llvm llvm-devel
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host x86_64-unknown-linux-gnu --profile minimal -y
