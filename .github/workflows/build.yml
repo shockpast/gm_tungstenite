@@ -11,25 +11,24 @@ env:
 jobs:
   build_linux:
     runs-on: ubuntu-latest
-    container: quay.io/pypa/manylinux_2_28_i686
 
     defaults:
       run:
         shell: sh
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v6
 
       - run: |
-          dnf -y update
-          dnf -y groupinstall "Development Tools"
-          dnf -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl
-          dnf -y install clang clang-devel llvm llvm-devel
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get ugprade -y
+          sudo apt-get install -y gcc-multilib g++-multilib clang:i386 libssl-dev:i386 pkg-config:i386 cmake:i386 libclang-dev:i386
 
-      - name: install nodejs
-        run: |
-          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-          dnf -y install nodejs
+          export OPENSSL_LIB_DIR=/usr/lib/i386-linux-gnu
+          export OPENSSL_INCLUDE_DIR=/usr/include
+          export LIBCLANG_PATH=/usr/lib/i386-linux-gnu
+          export PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host i686-unknown-linux-gnu --profile minimal -y
