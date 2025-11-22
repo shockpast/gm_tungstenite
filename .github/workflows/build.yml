@@ -26,6 +26,9 @@ jobs:
           dnf -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl
           dnf -y install clang clang-devel llvm llvm-devel
 
+          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+          dnf -y install nodejs
+
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host i686-unknown-linux-gnu --profile minimal -y
 
@@ -40,7 +43,7 @@ jobs:
           mv target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so binaries/gmsv_tungstenite_linux.dll
 
       - name: upload
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v5
         with:
           name: gmsv_tungstenite_linux
           path: binaries/gmsv_tungstenite_linux.dll
