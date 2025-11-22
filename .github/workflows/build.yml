@@ -18,18 +18,13 @@ jobs:
         shell: sh
 
     steps:
-      - name: install nodejs v20
-        run: |
-          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-          yum install -y nodejs
-
       - uses: actions/checkout@v1
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host i686-unknown-linux-gnu --profile minimal -y
 
       - name: cargo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v1
         with:
           path: |
             ~/.cargo/registry
@@ -45,13 +40,15 @@ jobs:
           cargo build --release --target i686-unknown-linux-gnu
 
       - run: strip target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so
-      - run: mkdir target/i686-unknown-linux-gnu/release/bin &&  mv target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so target/i686-unknown-linux-gnu/release/bin/gmsv_tungstenite_linux.dll
+      - run: |
+          mkdir binaries
+          mv target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so binaries/gmsv_tungstenite_linux.dll
 
       - name: upload
         uses: actions/upload-artifact@v5
         with:
           name: gmsv_tungstenite_linux
-          path: target/i686-unknown-linux-gnu/release/bin/gmsv_tungstenite_linux.dll
+          path: binaries/gmsv_tungstenite_linux.dll
 
   build_linux64:
     runs-on: ubuntu-latest
@@ -62,18 +59,13 @@ jobs:
         shell: sh
 
     steps:
-      - name: install nodejs v20
-        run: |
-          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-          yum install -y nodejs
-
       - uses: actions/checkout@v1
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host x86_64-unknown-linux-gnu --profile minimal -y
 
       - name: cargo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v1
         with:
           path: |
             ~/.cargo/registry
@@ -89,13 +81,15 @@ jobs:
           cargo build --release --target x86_64-unknown-linux-gnu
 
       - run: strip target/x86_64-unknown-linux-gnu/release/libgmsv_tungstenite.so
-      - run: mkdir target/x86_64-unknown-linux-gnu/release/bin &&  mv target/x86_64-unknown-linux-gnu/release/libgmsv_tungstenite.so target/x86_64-unknown-linux-gnu/release/bin/gmsv_tungstenite_linux64.dll
+      - run: |
+          mkdir binaries
+          mv target/x86_64-unknown-linux-gnu/release/libgmsv_tungstenite.so binaries/gmsv_tungstenite_linux64.dll
 
       - name: upload
         uses: actions/upload-artifact@v5
         with:
           name: gmsv_tungstenite_linux
-          path: target/x86_64-unknown-linux-gnu/release/bin/gmsv_tungstenite_linux64.dll
+          path: binaries/gmsv_tungstenite_linux64.dll
 
   build_windows:
     runs-on: windows-latest
@@ -122,12 +116,12 @@ jobs:
         run: cargo build --release --target i686-pc-windows-msvc
 
       - run: |
-          mkdir -p target/windows_release
-          mv target/i686-pc-windows-msvc/release/gmsv_tungstenite.dll target/windows_release/gmsv_tungstenite_win32.dll
-          mv target/x86_64-pc-windows-msvc/release/gmsv_tungstenite.dll target/windows_release/gmsv_tungstenite_win64.dll
+          mkdir -p binaries
+          mv target/i686-pc-windows-msvc/release/gmsv_tungstenite.dll binaries/gmsv_tungstenite_win32.dll
+          mv target/x86_64-pc-windows-msvc/release/gmsv_tungstenite.dll binaries/gmsv_tungstenite_win64.dll
 
       - name: upload
         uses: actions/upload-artifact@v5
         with:
           name: gmsv_tungstenite_win
-          path: target/windows_release/*.dll
+          path: binaries/*.dll
