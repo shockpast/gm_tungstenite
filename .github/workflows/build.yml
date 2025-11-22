@@ -26,8 +26,19 @@ jobs:
           dnf -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl
           dnf -y install clang clang-devel llvm llvm-devel
 
-          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-          dnf -y install nodejs
+      - name: install nodejs v20
+        run: |
+          NODE_VERSION=v20.11.1
+          NODE_DIR=node-${NODE_VERSION}-linux-x64
+
+          cd /opt
+          curl -fsSL https://nodejs.org/dist/${NODE_VERSION}/${NODE_DIR}.tar.xz -o node.tar.xz
+          tar -xf node.tar.xz
+          mv ${NODE_DIR} node20
+
+          ln -sf /opt/node20/bin/node /usr/local/bin/node
+          ln -sf /opt/node20/bin/npm  /usr/local/bin/npm
+          ln -sf /opt/node20/bin/npx  /usr/local/bin/npx
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host i686-unknown-linux-gnu --profile minimal -y
