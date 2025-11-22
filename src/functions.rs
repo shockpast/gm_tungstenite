@@ -9,6 +9,7 @@ pub mod lua_tungstenite {
         Generic,
         Error,
         Disconnect,
+        Connect,
     }
 
     #[derive(Debug)]
@@ -84,6 +85,12 @@ pub mod lua_tungstenite {
                                         .unwrap();
                                 }
                             },
+                            DataType::Connect => {
+                                if let Ok(func) = mt.get::<lua::Function>(l, "on_connect") {
+                                    func.call_no_rets_logged(l, (mt, message.data))
+                                        .unwrap();
+                                }
+                            },
                             DataType::Disconnect => {
                                 if let Ok(func) = mt.get::<lua::Function>(l, "on_disconnect") {
                                     func.call_no_rets_logged(l, (mt, message.data))
@@ -110,7 +117,10 @@ pub mod lua_tungstenite {
 
         std::thread::spawn(move || {
             let (mut socket, _) = match tungstenite::connect(url) {
-                Ok(res) => res,
+                Ok(res) => {
+                    let _ = tx_to_lua.send(LuaChannel { data_type: DataType::Connect, data: String::default() });
+                    res
+                },
                 Err(err) => {
                     let _ = tx_to_lua.send(LuaChannel { data_type: DataType::Error, data: err.to_string() });
                     return;
