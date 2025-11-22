@@ -23,7 +23,7 @@ jobs:
       - run: |
           yum -y update
           yum -y groupinstall "Development Tools"
-          yum -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl clang
+          yum -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl clang-devel
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host i686-unknown-linux-gnu --profile minimal -y
@@ -58,7 +58,7 @@ jobs:
       - run: |
           yum -y update
           yum -y groupinstall "Development Tools"
-          yum -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl clang
+          yum -y install openssl-devel bzip2 bzip2-devel zlib-devel xz-devel wget curl clang-devel
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host x86_64-unknown-linux-gnu --profile minimal -y
