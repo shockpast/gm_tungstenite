@@ -7,47 +7,21 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  LIB_NAME: gmsv_tungstenite
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        arch: [x86_64, i686]
-    runs-on: ${{ matrix.os }}
+  build_linux:
+    runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux2014_i686
+
+    defaults:
+      run:
+        shell: sh
 
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
 
-      - name: install linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config curl git libssl-dev
-
-          if [ "${{ matrix.arch }}" = "i686" ]; then
-            sudo dpkg --add-architecture i386
-            sudo apt-get update
-            sudo apt-get install -y gcc-multilib g++-multilib libssl-dev:i386
-
-            rustup target add i686-unknown-linux-gnu
-          else
-            rustup target add x86_64-unknown-linux-gnu
-          fi
-
-      - name: install windows dependencies
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          choco install -y curl
-
-          if [[ "${{ matrix.arch }}" == "i686" ]]; then
-            rustup target add i686-pc-windows-gnu
-          else
-            rustup target add x86_64-pc-windows-gnu
-          fi
+      - name: install rust
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host i686-unknown-linux-gnu --profile minimal -y
 
       - name: cargo cache
         uses: actions/cache@v4
@@ -57,52 +31,93 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
-      - run: |
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
-              TARGET="x86_64-unknown-linux-gnu"
-            else
-              TARGET="i686-unknown-linux-gnu"
-            fi
-          else
-            if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
-              TARGET="x86_64-pc-windows-gnu"
-            else
-              TARGET="i686-pc-windows-gnu"
-            fi
-          fi
+      - name: build
+        run: |
+          source $HOME/.cargo/env
+          cargo build --release --target i686-unknown-linux-gnu
 
-          echo "target=$TARGET" >> $GITHUB_ENV
+      - run: strip target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so
+      - run: mkdir target/i686-unknown-linux-gnu/release/bin &&  mv target/i686-unknown-linux-gnu/release/libgmsv_tungstenite.so target/i686-unknown-linux-gnu/release/bin/gmsv_tungstenite_linux.dll
 
-      - name: build (${{ matrix.arch }})
-        run: cargo build --release --target ${{ env.target }}
-
-      # suffix
-      - run: |
-          case "${{ env.target }}" in
-            x86_64-unknown-linux-gnu) echo "suffix=linux64" >> $GITHUB_ENV ;;
-            i686-unknown-linux-gnu) echo "suffix=linux" >> $GITHUB_ENV ;;
-            x86_64-pc-windows-gnu) echo "suffix=win64" >> $GITHUB_ENV ;;
-            i686-pc-windows-gnu) echo "suffix=win32" >> $GITHUB_ENV ;;
-          esac
-
-      # rename with suffix
-      - run: |
-          if [[ "${{ env.target }}" == *"windows"* ]]; then
-            EXT=".dll";
-          else
-            EXT=".so";
-          fi
-
-          LIB_PATH="target/${{ env.target }}/release/${{ env.LIB_NAME }}${EXT}"
-          NEW_LIB_PATH="target/${{ env.target }}/release/${{ env.LIB_NAME }}_${{ env.suffix }}${EXT}"
-
-          mv $LIB_PATH $NEW_LIB_PATH
-
-      - name: upload artifact
+      - name: upload
         uses: actions/upload-artifact@v5
         with:
-          name: ${{ env.LIB_NAME }}_${{ env.suffix }}
-          path: target/${{ env.target }}/release/${{ env.LIB_NAME }}_${{ env.suffix }}${EXT}
+          name: gmsv_tungstenite_linux
+          path: target/i686-unknown-linux-gnu/release/bin/gmsv_tungstenite_linux.dll
+
+  build_linux64:
+    runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux2014_x86_64
+
+    defaults:
+      run:
+        shell: sh
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install rust
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-host x86_64-unknown-linux-gnu --profile minimal -y
+
+      - name: cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: build
+        run: |
+          source $HOME/.cargo/env
+          cargo build --release --target x86_64-unknown-linux-gnu
+
+      - run: strip target/x86_64-unknown-linux-gnu/release/libgmsv_tungstenite.so
+      - run: mkdir target/x86_64-unknown-linux-gnu/release/bin &&  mv target/x86_64-unknown-linux-gnu/release/libgmsv_tungstenite.so target/x86_64-unknown-linux-gnu/release/bin/gmsv_tungstenite_linux64.dll
+
+      - name: upload
+        uses: actions/upload-artifact@v5
+        with:
+          name: gmsv_tungstenite_linux
+          path: target/x86_64-unknown-linux-gnu/release/bin/gmsv_tungstenite_linux64.dll
+
+  build_windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: rustup target add x86_64-pc-windows-msvc && rustup target add i686-pc-windows-msvc
+
+      - name: cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: build 64-bit
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: build 32-bit
+        run: cargo build --release --target i686-pc-windows-msvc
+
+      - run: |
+          mkdir -p target/windows_release
+          mv target/i686-pc-windows-msvc/release/gmsv_tungstenite.dll target/windows_release/gmsv_tungstenite_win32.dll
+          mv target/x86_64-pc-windows-msvc/release/gmsv_tungstenite.dll target/windows_release/gmsv_tungstenite_win64.dll
+
+      - name: upload
+        uses: actions/upload-artifact@v5
+        with:
+          name: gmsv_tungstenite_win
+          path: target/windows_release/*.dll
