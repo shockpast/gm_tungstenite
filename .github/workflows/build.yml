@@ -26,10 +26,10 @@ jobs:
           sudo apt-get install -y clang libclang-dev llvm-dev
           sudo apt-get install -y libssl-dev:i386 pkg-config:i386 gcc-multilib g++-multilib libc6-dev:i386 libstdc++6:i386
 
+          export OPENSSL_DIR=/usr
           export OPENSSL_LIB_DIR=/usr/lib/i386-linux-gnu
           export OPENSSL_INCLUDE_DIR=/usr/include
           export PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig
-          export LIBCLANG_PATH=/usr/lib/llvm-18/lib
 
       - name: install rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal -y
