@@ -18,7 +18,6 @@ end
 
 print(conn) -- "tungstenite (uuidv4)"
 
-local i = 0
-timer.Create("tungstenite.examples.echo", 3, 0, function()
+for i = 1, 10 do
   conn:send(("hello, gmsv_tungstenite! (%d)"):format(i))
-end)
+end
