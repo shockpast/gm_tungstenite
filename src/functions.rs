@@ -47,7 +47,7 @@ pub mod lua_tungstenite {
         }
         fn meta_methods(methods: &mut lua::Methods) {
             methods.add(c"__tostring", |_l: &lua::State, this: UserDataRef<Socket>| {
-                format!("tungstenite ({})", this.borrow().id.to_string())
+                format!("tungstenite ({})", this.borrow().id)
             });
             methods.add(c"__gc", |l: &lua::State, this: UserDataRef<Socket>| -> lua::Result<()> {
                 SOCKETS.with(|c| c.borrow_mut().retain(|s| !std::ptr::eq(s, &this)));
@@ -113,58 +113,48 @@ pub mod lua_tungstenite {
                     ud.rx.clone()
                 };
 
-                match rx.lock() {
-                    Ok(receiver) => {
-                        match receiver.try_recv() {
-                            Ok(message) => {
-                                match message.message_type {
-                                    LuaMessageType::Message => {
-                                        if let Ok(func) = mt.get::<lua::Function>(l, "on_message") {
-                                            if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
-                                                l.error_no_halt_with_stack(&e.to_string());
-                                            }
-                                        }
-                                    },
-                                    LuaMessageType::Error => {
-                                        if let Ok(func) = mt.get::<lua::Function>(l, "on_error") {
-                                            if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
-                                                l.error_no_halt_with_stack(&e.to_string());
-                                            }
-                                        }
-                                    },
-                                    LuaMessageType::Connect => {
-                                        if let Ok(func) = mt.get::<lua::Function>(l, "on_connect") {
-                                            if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
-                                                l.error_no_halt_with_stack(&e.to_string());
-                                            }
-                                        }
-                                    },
-                                    LuaMessageType::Disconnect => {
-                                        if let Ok(func) = mt.get::<lua::Function>(l, "on_disconnect") {
-                                            {
-                                                let mut ud_mut = ud_ref.borrow_mut();
-                                                ud_mut.closed = true;
-                                            }
+                if let Ok(receiver) = rx.lock() {
+                    match receiver.try_recv() {
+                        Ok(message) => {
+                            match message.message_type {
+                                LuaMessageType::Connect
+                                | LuaMessageType::Message
+                                | LuaMessageType::Error => {
+                                    let key = match message.message_type {
+                                        LuaMessageType::Connect => "on_connect",
+                                        LuaMessageType::Message => "on_message",
+                                        LuaMessageType::Error => "on_error",
+                                        _ => unreachable!()
+                                    };
 
-                                            if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
-                                                l.error_no_halt_with_stack(&e.to_string());
-                                            }
+                                    let _ = mt.get::<lua::Function>(l, key)
+                                        .and_then(|func| func.call_no_rets(l, (mt, message.data)))
+                                        .map_err(|e| l.error_no_halt_with_stack(&e.to_string()));
+                                },
+                                LuaMessageType::Disconnect => {
+                                    if let Ok(func) = mt.get::<lua::Function>(l, "on_disconnect") {
+                                        {
+                                            let mut ud_mut = ud_ref.borrow_mut();
+                                            ud_mut.closed = true;
+                                        }
+
+                                        if let Err(e) = func.call_no_rets(l, (mt, message.data)) {
+                                            l.error_no_halt_with_stack(&e.to_string());
                                         }
                                     }
+
+                                    return false;
                                 }
                             }
-                            Err(mpsc::TryRecvError::Empty) => {},
-                            Err(mpsc::TryRecvError::Disconnected) => {
-                                return false;
-                            }
                         }
-                    }
-                    Err(_) => {
-                        return false;
-                    }
-                }
+                        Err(mpsc::TryRecvError::Disconnected) => { return false },
+                        Err(mpsc::TryRecvError::Empty) => {},
+                    };
 
-                true
+                    true
+                } else {
+                    false
+                }
             })
         });
 
