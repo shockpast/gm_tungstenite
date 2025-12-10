@@ -1,7 +1,7 @@
 pub mod lua_tungstenite {
     use std::{cell::RefCell, sync::{Arc, Mutex, Once, mpsc}};
 
-    use gmodx::lua::{self, ObjectLike, UserDataRef};
+    use gmodx::{bstr, lua::{self, ObjectLike, UserDataRef}};
     use tungstenite::{Message, Utf8Bytes, protocol::{CloseFrame, frame::coding::CloseCode}};
 
     #[derive(Debug)]
@@ -33,7 +33,8 @@ pub mod lua_tungstenite {
         rx: Arc<Mutex<mpsc::Receiver<LuaChannel>>>,
 
         id: uuid::Uuid,
-        closed: bool
+        closed: bool,
+        url: String,
     }
 
     impl lua::UserData for Socket {
@@ -41,9 +42,11 @@ pub mod lua_tungstenite {
             methods.add(c"send", send);
             methods.add(c"close", close);
             methods.add(c"close_now", close_now);
-
-            // somewhat compatibility layer with gwsockets
+            methods.add(c"open", open);
+            
+            // @note: somewhat compatibility layer with gwsockets
             methods.add(c"write", send);
+            methods.add(c"closeNow", close_now);
         }
         fn meta_methods(methods: &mut lua::Methods) {
             methods.add(c"__tostring", |_l: &lua::State, this: UserDataRef<Socket>| {
@@ -66,6 +69,87 @@ pub mod lua_tungstenite {
 
     static CALLBACKS: Once = Once::new();
 
+    fn spawn(url: String, tx_to_lua: mpsc::Sender<LuaChannel>, rx_from_lua: mpsc::Receiver<RustChannel>) {
+        std::thread::spawn(move || {
+            let (mut socket, _) = match tungstenite::connect(&url) {
+                Ok(res) => {
+                    let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Connect, data: None });
+                    res
+                },
+                Err(err) => {
+                    let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Error, data: Some(err.to_string()) });
+                    return;
+                }
+            };
+
+            match &mut socket.get_mut() {
+                tungstenite::stream::MaybeTlsStream::Plain(tcp) => {
+                    tcp.set_nodelay(true)
+                        .unwrap();
+                    tcp.set_nonblocking(true)
+                        .unwrap(); // @note: hopium on maximum that it won't ever backfire
+                },
+                tungstenite::stream::MaybeTlsStream::NativeTls(tls_stream) => {
+                    let stream = tls_stream.get_mut();
+
+                    stream.set_nodelay(true)
+                        .unwrap();
+                    stream.set_nonblocking(true)
+                        .unwrap();
+                }
+                _ => {}
+            }
+
+            loop {
+                match rx_from_lua.try_recv() {
+                    Ok(message) => {
+                        match message.message_type {
+                            RustMessageType::Message => {
+                                if let Some(ref text) = message.data {
+                                    let _ = socket.send(Message::text(text));
+                                }
+                            },
+                            RustMessageType::Close => {
+                                let _ = socket.close(Some(CloseFrame { code: CloseCode::Normal, reason: Utf8Bytes::from_static("unknown") }));
+                            },
+                        }
+                    },
+                    Err(mpsc::TryRecvError::Empty) => {},
+                    Err(mpsc::TryRecvError::Disconnected) => break,
+                }
+
+                match socket.read() {
+                    Ok(Message::Text(text)) => {
+                        let utext = match std::str::from_utf8(text.as_bytes()) {
+                            Ok(s) => s.to_string(),
+                            Err(_) => String::from_utf8_lossy(text.as_bytes()).to_string()
+                        };
+
+                        let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Message, data: Some(utext) });
+                    }
+                    Ok(Message::Ping(p)) => {
+                        let _ = socket.send(Message::Pong(p));
+                    }
+                    Ok(Message::Close(frame)) => {
+                        if let Some(frame) = frame {
+                            let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Disconnect, data: Some(frame.reason.to_string()) });
+                        } else {
+                            let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Disconnect, data: Some("unknown".to_string()) });
+                        }
+                    },
+                    Err(tungstenite::Error::Io(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => {},
+                    Err(e) => {
+                        let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Error, data: Some(e.to_string()) });
+                        break;
+                    }
+                    _ => {},
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
+    }
+
     // @note: metatable functions
     pub fn send(_l: &lua::State, this: lua::UserDataRef<Socket>, data: lua::String) -> lua::Result<()> {
         let ud = this.borrow();
@@ -80,7 +164,8 @@ pub mod lua_tungstenite {
         let mut ud = this.borrow_mut();
         ud.closed = true;
 
-        ud.tx.send(RustChannel { message_type: RustMessageType::Close, data: None })
+        ud.tx
+            .send(RustChannel { message_type: RustMessageType::Close, data: None })
             .map_err(|e| lua::Error::Runtime(format!("failed to close connection ({e})")))?;
 
         Ok(())
@@ -100,6 +185,42 @@ pub mod lua_tungstenite {
         }
 
         Ok(())
+    }
+    pub fn open(l: &lua::State, this: lua::UserDataRef<Socket>) -> lua::Result<bool> {
+        {
+            let ud = this.borrow();
+            if !ud.closed {
+                return Ok(true);
+            }
+        }
+
+        let url = {
+            let ud = this.borrow();
+            ud.url.clone()
+        };
+
+        let (tx_to_thread, rx_from_lua) = mpsc::channel::<RustChannel>();
+        let (tx_to_lua, rx_to_lua) = mpsc::channel::<LuaChannel>();
+
+        let rx_to_lua_arc = Arc::new(Mutex::new(rx_to_lua));
+
+        spawn(url, tx_to_lua, rx_from_lua);
+
+        {
+            let mut ud = this.borrow_mut();
+            ud.tx = tx_to_thread;
+            ud.rx = rx_to_lua_arc;
+            ud.closed = false;
+        }
+
+        SOCKETS.with(|c| {
+            if !c.borrow().iter().any(|s| std::ptr::eq(s, &this)) {
+                c.borrow_mut().push(this.clone());
+            }
+        });
+        CALLBACKS.call_once(|| init(l).expect("failed to create a run_callbacks timer"));
+
+        Ok(true)
     }
 
     // @note: api functions
@@ -178,90 +299,23 @@ pub mod lua_tungstenite {
 
         let rx_to_lua_arc = Arc::new(Mutex::new(rx_to_lua));
 
-        std::thread::spawn(move || {
-            let (mut socket, _) = match tungstenite::connect(url) {
-                Ok(res) => {
-                    let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Connect, data: None });
-                    res
-                },
-                Err(err) => {
-                    let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Error, data: Some(err.to_string()) });
-                    return;
-                }
-            };
-
-            match &mut socket.get_mut() {
-                tungstenite::stream::MaybeTlsStream::Plain(tcp) => {
-                    tcp.set_nodelay(true)
-                        .unwrap();
-                    tcp.set_nonblocking(true)
-                        .unwrap(); // @note: hopium on maximum that it won't ever backfire
-                },
-                tungstenite::stream::MaybeTlsStream::NativeTls(tls_stream) => {
-                    let stream = tls_stream.get_mut();
-
-                    stream.set_nodelay(true)
-                        .unwrap();
-                    stream.set_nonblocking(true)
-                        .unwrap();
-                }
-                _ => {}
-            }
-
-            loop {
-                match rx_from_lua.try_recv() {
-                    Ok(message) => {
-                        match message.message_type {
-                            RustMessageType::Message => {
-                                if let Some(ref text) = message.data {
-                                    let _ = socket.send(Message::text(text));
-                                }
-                            },
-                            RustMessageType::Close => {
-                                let _ = socket.close(Some(CloseFrame { code: CloseCode::Normal, reason: Utf8Bytes::default() }));
-                            },
-                        }
-                    },
-                    Err(mpsc::TryRecvError::Empty) => {},
-                    Err(mpsc::TryRecvError::Disconnected) => break,
-                }
-
-                match socket.read() {
-                    Ok(Message::Text(text)) => {
-                        let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Message, data: Some(text.to_string()) });
-                    }
-                    Ok(Message::Ping(p)) => {
-                        let _ = socket.send(Message::Pong(p));
-                    }
-                    Ok(Message::Close(frame)) => {
-                        if let Some(frame) = frame {
-                            let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Disconnect, data: Some(frame.reason.to_string()) });
-                        } else {
-                            let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Disconnect, data: Some("unknown".into()) });
-                        }
-                    },
-                    Err(tungstenite::Error::Io(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => {},
-                    Err(e) => {
-                        let _ = tx_to_lua.send(LuaChannel { message_type: LuaMessageType::Error, data: Some(e.to_string()) });
-                        break;
-                    }
-                    _ => {},
-                }
-
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        });
+        spawn(url.clone(), tx_to_lua, rx_from_lua);
 
         let ud = l.create_userdata(Socket {
             tx: tx_to_thread,
             rx: rx_to_lua_arc,
 
             id: uuid::Uuid::new_v4(),
-            closed: false
+            closed: false,
+            url: url.clone(),
         });
 
         SOCKETS.with(|c| c.borrow_mut().push(ud.clone()));
         CALLBACKS.call_once(|| init(l).expect("failed to create a run_callbacks timer"));
+
+        l.get_global::<lua::Function>("test")
+            .unwrap().call_no_rets_logged(l, "фывфыв")
+            .unwrap();
 
         Ok(ud)
     }
