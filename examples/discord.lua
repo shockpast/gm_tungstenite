@@ -16,7 +16,7 @@ function connection:on_message(message)
       op = 2,
       d = {
         token = "x",
-        intents = 512,
+        intents = bit.lshift(1, 0) + bit.lshift(1, 9) + bit.lshift(1, 15), -- @note: GUILDS, GUILD_MESSAGES, MESSAGE_CONTENT
         properties = {
           os = "linux",
           browser = "gmod/tungstenite",
