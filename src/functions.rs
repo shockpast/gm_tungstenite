@@ -313,10 +313,6 @@ pub mod lua_tungstenite {
         SOCKETS.with(|c| c.borrow_mut().push(ud.clone()));
         CALLBACKS.call_once(|| init(l).expect("failed to create a run_callbacks timer"));
 
-        l.get_global::<lua::Function>("test")
-            .unwrap().call_no_rets_logged(l, "фывфыв")
-            .unwrap();
-
         Ok(ud)
     }
 }
