@@ -1,13 +1,25 @@
-pub mod functions;
+pub mod config;
+pub mod socket;
 
-use gmodx::*;
-use functions::lua_tungstenite;
+use gmodx::{gmod13_close, gmod13_open, lua::State};
+
+use crate::config::VERSION;
 
 #[gmod13_open]
-fn gmod13_open(l: lua::State) {
-    let t_tung = l.create_table();
-    t_tung.set(&l, "connect", l.create_function(lua_tungstenite::connect)).unwrap();
+fn gmod13_open(state: State) {
+    let table = state.create_table();
+    table.raw_set(&state, "VERSION", VERSION);
 
-    l.set_global("tungstenite", t_tung)
+    //
+    socket::on_gmod_open(&state, &table);
+
+    //
+    state
+        .set_global("tungstenite", table)
         .expect("failed to set 'tungstenite' global");
+}
+
+#[gmod13_close]
+fn gmod13_close(_l: State) {
+    socket::on_gmod_close();
 }
