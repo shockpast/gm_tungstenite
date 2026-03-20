@@ -4,10 +4,13 @@ use std::sync::{LazyLock, Mutex};
 use futures_util::{SinkExt, StreamExt};
 use gmodx::{is_closed, next_tick, lua::{AnyUserData, Function, ObjectLike}, tokio_tasks};
 use tokio::sync::mpsc;
+use tokio::time::{self, Duration, MissedTickBehavior};
 use tokio_tungstenite::{connect_async, tungstenite::{self, Message, Utf8Bytes, protocol::CloseFrame}};
 use uuid::Uuid;
 
 use crate::socket::types::{SocketCommand, SocketMetadata, SocketState};
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
 struct SocketRegistryEntry {
     target: AnyUserData,
@@ -79,6 +82,13 @@ pub fn queue_disconnect(id: Uuid, reason: String) {
     queue_callback(id, "on_disconnect", Some(reason));
 }
 
+fn notify_disconnect(meta: &Arc<SocketMetadata>, reason: impl Into<String>) {
+    meta.state.set(SocketState::Disconnected);
+    if meta.mark_disconnect_notified() {
+        queue_disconnect(meta.id, reason.into());
+    }
+}
+
 pub fn spawn(id: Uuid, meta: Arc<SocketMetadata>) -> mpsc::UnboundedSender<SocketCommand> {
     let (sender, receiver) = mpsc::unbounded_channel();
     tokio_tasks::spawn(handle_socket(receiver, id, meta));
@@ -91,7 +101,7 @@ async fn handle_socket(mut receiver: mpsc::UnboundedReceiver<SocketCommand>, id:
     let (stream, _) = match connection {
         Ok(parts) => parts,
         Err(err) => {
-            meta.state.set(SocketState::Disconnected);
+            notify_disconnect(&meta, format!("connect failed: {err}"));
             queue_callback(id, "on_error", Some(err.to_string()));
             return;
         }
@@ -101,23 +111,25 @@ async fn handle_socket(mut receiver: mpsc::UnboundedReceiver<SocketCommand>, id:
     queue_callback(id, "on_connect", None);
 
     let (mut writer, mut reader) = stream.split();
+    let mut heartbeat = time::interval(HEARTBEAT_INTERVAL);
+    heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    heartbeat.tick().await;
 
-    loop {
+    let disconnect_reason = loop {
         tokio::select! {
             maybe_command = receiver.recv() => {
                 let Some(command) = maybe_command else {
-                    break;
+                    break "socket command channel closed".to_string();
                 };
 
                 match command {
                     SocketCommand::Send(data) => {
                         if let Err(err) = writer.send(Message::Text(data.into())).await {
                             queue_callback(id, "on_error", Some(err.to_string()));
-                            break;
+                            break format!("write failed: {err}");
                         }
                     }
                     SocketCommand::Close => {
-                        meta.state.set(SocketState::Disconnected);
                         let frame = CloseFrame {
                             code: tungstenite::protocol::frame::coding::CloseCode::Normal,
                             reason: Utf8Bytes::from_static("closed by user"),
@@ -125,18 +137,20 @@ async fn handle_socket(mut receiver: mpsc::UnboundedReceiver<SocketCommand>, id:
 
                         if let Err(err) = writer.send(Message::Close(Some(frame))).await {
                             queue_callback(id, "on_error", Some(err.to_string()));
-                            break;
+                            break format!("close failed: {err}");
                         }
+
+                        break "closed by user".to_string();
                     }
                     SocketCommand::CloseNow => {
                         let _ = writer.close().await;
-                        break;
+                        break "closed by user".to_string();
                     }
                 }
             }
             maybe_message = reader.next() => {
                 let Some(message) = maybe_message else {
-                    break;
+                    break "connection closed".to_string();
                 };
 
                 match message {
@@ -144,36 +158,35 @@ async fn handle_socket(mut receiver: mpsc::UnboundedReceiver<SocketCommand>, id:
                         queue_callback(id, "on_message", Some(text.to_string()));
                     }
                     Ok(Message::Binary(data)) => {
-                        queue_callback(
-                            id,
-                            "on_message",
-                            Some(String::from_utf8_lossy(&data).to_string()),
-                        );
+                        queue_callback(id, "on_message", Some(String::from_utf8_lossy(&data).to_string()));
                     }
                     Ok(Message::Ping(data)) => {
                         if let Err(err) = writer.send(Message::Pong(data)).await {
                             queue_callback(id, "on_error", Some(err.to_string()));
-                            break;
+                            break format!("pong failed: {err}");
                         }
                     }
                     Ok(Message::Close(frame)) => {
-                        meta.state.set(SocketState::Disconnected);
-                        if meta.mark_disconnect_notified() {
-                            let reason = frame
-                                .map(|frame| frame.reason.to_string())
-                                .unwrap_or_else(|| "unknown".to_string());
-                            queue_disconnect(id, reason);
-                        }
-                        break;
+                        break frame
+                            .map(|frame| frame.reason.to_string())
+                            .filter(|reason| !reason.is_empty())
+                            .unwrap_or_else(|| "connection closed".to_string());
                     }
                     Err(err) => {
-                        meta.state.set(SocketState::Disconnected);
                         queue_callback(id, "on_error", Some(err.to_string()));
-                        break;
+                        break format!("read failed: {err}");
                     }
                     _ => {}
                 }
             }
+            _ = heartbeat.tick() => {
+                if let Err(err) = writer.send(Message::Ping(Vec::new().into())).await {
+                    queue_callback(id, "on_error", Some(err.to_string()));
+                    break format!("heartbeat failed: {err}");
+                }
+            }
         }
-    }
+    };
+
+    notify_disconnect(&meta, disconnect_reason);
 }
