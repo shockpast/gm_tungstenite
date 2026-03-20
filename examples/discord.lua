@@ -1,17 +1,16 @@
 require("tungstenite")
 
 local discord = {}
+discord.metadata = { last_sequence = nil }
 discord.connection = discord.connection or tungstenite.connect("wss://gateway.discord.gg/?v=10&encoding=json")
 
 local connection = discord.connection
 function connection:on_message(message)
   local response = util.JSONToTable(message)
   if response == nil then return end
+  if response.s ~= nil then discord.metadata.last_sequence = response.s end
 
   if response.op == 10 then
-    local interval = response.d.heartbeat_interval / 1000
-    create_heartbeat(interval)
-
     local identify = {
       op = 2,
       d = {
@@ -32,8 +31,10 @@ function connection:on_message(message)
         }
       }
     }
-    
-    -- heartbeat()
+
+    create_heartbeat(response.d.heartbeat_interval / 1000)
+    heartbeat()
+
     connection:send(util.TableToJSON(identify))
   end
 
@@ -60,7 +61,7 @@ end
 function heartbeat()
   -- d will be omitted by TableToJSON, but this field might be useful in future
   -- read https://discord.com/developers/docs/events/gateway#connections for more
-  connection:send(util.TableToJSON({ op = 1, d = nil }))
+  connection:send(util.TableToJSON({ op = 1, d = discord.metadata.last_sequence or "null" }))
   print("[tungstenite/discord] sent heartbeat")
 end
 
