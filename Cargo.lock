@@ -355,7 +355,7 @@ dependencies = [
 
 [[package]]
 name = "gmsv_tungstenite"
-version = "1.1.0-beta.2"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "futures-util",
